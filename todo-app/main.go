@@ -1,7 +1,9 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"os"
 	"strconv"
 	"time"
 
@@ -40,11 +42,11 @@ func (td *Todos) delete(id int) {
 		if (*td)[i].ID == id {
 			newList := append((*td)[:i], (*td)[i+1:]...) // Creates a new slcie without i (the deleted task)
 			*td = newList
-			fmt.Printf("Item deleted")
+			fmt.Printf("Item deleted\n")
 			return
 		}
 	}
-	fmt.Printf("There is no matching ID to delete")
+	fmt.Printf("There is no matching ID to delete\n")
 	// check IDs
 	// if ID matches the one being requested to be deleted on the command line, then delete it
 	// if not check the next ID
@@ -55,11 +57,12 @@ func (td *Todos) complete(id int) {
 	for i := 0; i < len(*td); i++ {
 		if (*td)[i].ID == id {
 			(*td)[i].Completed = true
-			fmt.Printf("Item marked as complete")
+			(*td)[i].CompletedAt = time.Now()
+			fmt.Printf("Item marked as complete\n")
 			return
 		}
 	}
-	fmt.Printf("There is no matching ID to complete")
+	fmt.Printf("There is no matching ID to complete\n")
 	// check ids
 	// if ID matches the one being requested to be completed on the command line, then cahnge its complete to completed
 	// if not check the next ID
@@ -67,8 +70,7 @@ func (td *Todos) complete(id int) {
 
 // func display all tasks
 func (td *Todos) showList() {
-	tbl := table.New()
-	tbl.AddRow("ID", "Title", "Completed?", "Created At", "Completed At")
+	tbl := table.New("ID", "Title", "Completed?", "Created At", "Completed At")
 
 	for _, item := range *td {
 		tbl.AddRow(
@@ -85,28 +87,29 @@ func (td *Todos) showList() {
 
 // subcommands to call these funcs
 
-var td Todos
+var td Todos // we create the real task list here
 
 type command struct {
 	Name string
 	Help string
-	Run  func(args []string) error
+	Run  func(args []string) error // Function takes in one param and returns an error e.g. Run will be the function we create, that takes in 
 }
 
-var commands = []command{
-	{Name: "add", Help: "add an item", Run: addCmd(&td)},
+var commands = []command{ // we create a list of commands here - this is made from a slice of the struct
+	{Name: "add", Help: "add an item", Run: addCmd(&td)}, // ensure each follow the structs format
 	{Name: "delete", Help: "delete an item", Run: deleteCmd(&td)},
 	{Name: "done", Help: "mark an item as done", Run: completeCmd(&td)},
-	{Name: "list", Help: "shwos all items on your todo list", Run: completeCmd(&td)},
+	{Name: "list", Help: "shows all items on your todo list", Run: listCmd(&td)},
 }
 
 func addCmd(td *Todos) func(args []string) error {
 	return func(args []string) error {
 		if len(args) < 1 {
-			return fmt.Errorf("missing title")
+			return fmt.Errorf("missing title\n")
 		}
 		title := args[0]
 		td.add(title)
+		saveTodos(td)
 		return nil
 	}
 	// parse args to get the title of the task to be added
@@ -116,7 +119,7 @@ func addCmd(td *Todos) func(args []string) error {
 func deleteCmd(td *Todos) func(args []string) error {
 	return func(args []string) error {
 		if len(args) < 1 {
-			return fmt.Errorf("missing id")
+			return fmt.Errorf("missing id\n")
 		}
 		id := args[0]
 		integer, err := strconv.Atoi(id)
@@ -124,6 +127,7 @@ func deleteCmd(td *Todos) func(args []string) error {
 			fmt.Println("failed to convert string to integer", err)
 		}
 		td.delete(integer)
+		saveTodos(td)
 		return nil
 	}
 	// parse args to get the ID of the task to be deleted
@@ -134,7 +138,7 @@ func deleteCmd(td *Todos) func(args []string) error {
 func completeCmd(td *Todos) func(args []string) error {
 	return func(args []string) error {
 		if len(args) < 1 {
-			return fmt.Errorf("missing id")
+			return fmt.Errorf("missing id\n")
 		}
 		done := args[0]
 		integer, err := strconv.Atoi(done)
@@ -142,6 +146,7 @@ func completeCmd(td *Todos) func(args []string) error {
 			fmt.Println("failted to convert string to integer", err)
 		}
 		td.complete(integer)
+		saveTodos(td)
 		return nil
 
 	}
@@ -152,10 +157,51 @@ func completeCmd(td *Todos) func(args []string) error {
 func listCmd(td *Todos) func(args []string) error {
 	return func(args []string) error {
 		td.showList()
+		saveTodos(td)
 		return nil
 	}
 }
 
+func loadTodos(td *Todos) error {
+	data, err := os.ReadFile("todos.json")
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil // no file yet, start empty
+		}
+		return err
+	}
+
+	return json.Unmarshal(data, td)
+}
+
+func saveTodos(td *Todos) error {
+	data, err := json.MarshalIndent(td, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	return os.WriteFile("todos.json", data, 0644)
+}
+
 // implementing commands
 
-// https://medium.com/data-science/how-to-create-a-cli-in-golang-with-cobra-d729641c7177
+func main() {
+
+	loadTodos(&td)
+
+	cmdName := os.Args[1]
+	args := os.Args[2:]
+
+	for _, command := range commands {
+		if command.Name == cmdName {
+			err := command.Run(args)
+			if err != nil {
+				fmt.Println("Error:", err)
+			}
+			return
+		}
+	}
+	fmt.Println("unknown command:\n", cmdName)
+
+	saveTodos(&td)
+}
